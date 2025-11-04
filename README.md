@@ -1,31 +1,41 @@
 # FinSolve RBAC Chatbot
 
-Role-aware Retrieval Augmented Generation (RAG) chatbot built for the Codebasics [DS RPC-01 challenge](https://codebasics.io/challenge/codebasics-gen-ai-data-science-resume-project-challenge). The solution empowers FinSolve teams to query internal data with fine-grained role based access control (RBAC).
+Role-aware Retrieval Augmented Generation (RAG) chatbot built for the Codebasics [DS RPC-01 challenge](https://codebasics.io/challenge/codebasics-gen-ai-data-science-resume-project-challenge). The solution enables FinSolve teams to query internal data with fine-grained role based access control (RBAC) across both unstructured documents and structured CSV datasets.
 
 ![FinSolve Overview](resources/RPC_01_Thumbnail.jpg)
 
 ## Features
-- FastAPI backend with HTTP Basic authentication and centralized role management.
-- Chroma vector store with `all-MiniLM-L6-v2` embeddings to power role-scoped retrieval.
-- Groq LLM integration (`llama-3.1-8b-instant`) with a deterministic fallback when no API key is provided.
-- Streamlit chat UI featuring login, configurable retrieval depth, chat history, and source citations.
-- Extensible role mapping supporting engineering, finance, HR, marketing, employees, and C-level usage.
+- FastAPI backend with HTTP Basic authentication, centralized role mapping, and RBAC enforcement at retrieval time.
+- Chroma vector store with `all-MiniLM-L6-v2` embeddings for scoped RAG responses.
+- Groq LLM integration (`llama-3.1-8b-instant`) with a deterministic summary fallback when no API key is available.
+- DuckDB-backed SQL path for department CSV files with strict table filtering and automatic fallback to RAG on policy or execution failures.
+- Streamlit chat UI featuring login, chat history, configurable retrieval depth, and source citations.
 
 ## Quick Start
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/<your-username>/ds-rpc-01.git
-   cd ds-rpc-01
+   git clone https://github.com/<your-username>/rbac-agent.git
+   cd rbac-agent
    ```
-2. **Create a virtual environment and install dependencies**
+2. **Create a uv-managed virtual environment**
    ```bash
-   python -m venv .venv
-   .venv\Scripts\activate  # Windows
-   # source .venv/bin/activate  # macOS/Linux
-   pip install -e .
+   uv venv .venv
+   .venv\Scripts\activate          # Windows
+   # source .venv/bin/activate     # macOS/Linux
    ```
-3. **(Optional) Configure environment variables**
-   - `GROQ_API_KEY`: enables Groq-hosted LLM generation.
+3. **Install dependencies**
+   ```bash
+   uv pip sync requirements.lock
+   # Regenerate the lock if you modify pyproject.toml:
+   # uv pip compile pyproject.toml --output-file requirements.lock
+   ```
+4. **Configure environment variables**
+   ```bash
+   copy .env.example .env           # Windows
+   # cp .env.example .env           # macOS/Linux
+   ```
+   Populate values such as:
+   - `GROQ_API_KEY`: optional, enables Groq-hosted LLM responses.
    - `FINCHAT_BACKEND_URL`: backend URL used by the Streamlit app (defaults to `http://localhost:8000`).
 
 ## Running the Backend
@@ -34,11 +44,20 @@ uvicorn app.main:app --reload
 ```
 The API exposes:
 - `GET /login`: validates credentials and returns the authenticated role.
-- `POST /chat`: processes a question with RAG + LLM, respecting role permissions.
-- `GET /roles`: lists the available roles and their department scopes.
-- `GET /health`: simple readiness probe.
+- `POST /chat`: routes through SQL or RAG depending on the classifier while enforcing role permissions.
+- `GET /roles`: lists roles with their accessible departments.
+- `GET /health`: readiness probe.
 
-Vector embeddings are generated at startup from the documents under `resources/data` and stored in `storage/vector_store`.
+For structured access, CSV files placed under `resources/data/<department>/` are exposed automatically. Table names follow the pattern `<department>_<filename>` (lowercase). The SQL service only accepts single `SELECT` statements and limits results to 50 rows; failures trigger a role-scoped RAG fallback with an explanatory note.
+
+## Streamlit Chat UI
+Run the web UI in a separate terminal:
+```bash
+streamlit run streamlit_app.py
+```
+- Enter your username/password to authenticate against the FastAPI backend.
+- Ask natural language questions; unstructured queries use the RAG path, while SQL-style queries (e.g., `SELECT * FROM hr_hr_data WHERE performance_rating >= 4`) run against the allowed CSV tables.
+- Adjust the `Top K` slider to control the number of RAG context chunks retrieved per request.
 
 ### Sample Credentials
 | Username | Password     | Role        |
@@ -50,30 +69,30 @@ Vector embeddings are generated at startup from the documents under `resources/d
 | Priya    | cboard123    | c_level     |
 | Anita    | employee123  | employee    |
 
-## Streamlit Chat UI
-Run the web UI in a separate terminal:
-```bash
-streamlit run streamlit_app.py
-```
-- Enter your username/password to authenticate against the FastAPI backend.
-- Ask natural language questions; the assistant will respond with contextual answers and cite the underlying documents.
-- Adjust the `Top K` slider to control how many knowledge-base chunks are retrieved for each query.
-
 ## Project Structure
 ```
 app/
 ├── main.py               # FastAPI entrypoint
 ├── schemas/              # Pydantic request/response models
-└── services/             # RBAC, RAG, and LLM service implementations
+└── services/             # RBAC, RAG, SQL, and LLM service implementations
 resources/
-└── data/                 # Department-specific knowledge base
+└── data/                 # Department-specific knowledge base (markdown + CSV)
 streamlit_app.py          # Streamlit front-end
 pyproject.toml            # Dependency management
+requirements.lock         # Resolved dependency lock (generated by uv)
+.env.example              # Sample environment configuration
 ```
 
+## Testing
+```bash
+uv run pytest
+```
+The tests cover the heuristic classifier, SQL authorization rules, and the `/chat` endpoint SQL happy path for the HR role.
+
 ## Extending the Solution
-- Add or modify roles via `app/services/role_manager.py`.
-- Place new documents under `resources/data/<department>`; the vector store rebuilds on startup.
+- Update role mappings in `app/services/role_manager.py` to add departments or tailor permissions.
+- Add markdown documents to `resources/data/<department>` to expand the RAG knowledge base.
+- Place CSV assets under the same department directory to expose them automatically through DuckDB.
 - Swap the embedding model or vector store settings in `app/services/rag_service.py` if needed.
 
-> **Note:** Without a `GROQ_API_KEY`, the chatbot falls back to a deterministic summary composed from the retrieved chunks, ensuring the app remains functional for local testing.
+> **Note:** Without a `GROQ_API_KEY`, the chatbot falls back to a deterministic summary composed from retrieved chunks, ensuring the app remains functional for local testing.

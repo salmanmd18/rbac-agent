@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import secrets
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from dotenv import load_dotenv
 
 from .schemas.chat import ChatRequest, ChatResponse, Reference
 from .services.llm_service import LLMService
+from .services.query_classifier import QueryClassifier, QueryType
 from .services.rag_service import RAGService
 from .services.role_manager import RoleManager
+from .services.sql_service import SQLExecutionError, SQLService, to_markdown_table
 
 
 app = FastAPI(
@@ -21,6 +24,8 @@ app = FastAPI(
 )
 security = HTTPBasic()
 role_manager = RoleManager()
+query_classifier = QueryClassifier()
+load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_ROOT = BASE_DIR / "resources" / "data"
@@ -46,6 +51,7 @@ def startup_event() -> None:
     )
     app.state.rag_service.build()
     app.state.llm_service = LLMService()
+    app.state.sql_service = SQLService(data_root=DATA_ROOT)
 
 
 app.add_middleware(
@@ -89,6 +95,16 @@ def roles() -> Dict[str, Dict[str, str]]:
     }
 
 
+@app.get("/structured-tables")
+def structured_tables(user: Dict[str, str] = Depends(authenticate)) -> Dict[str, List[str]]:
+    sql_service: SQLService = getattr(app.state, "sql_service", None)
+    if not sql_service:
+        return {"tables": []}
+    allowed_departments = role_manager.departments_for_role(user["role"])
+    tables = sql_service.available_tables(allowed_departments)
+    return {"tables": sorted(tables.keys())}
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(
     payload: ChatRequest,
@@ -96,6 +112,7 @@ def chat(
 ) -> ChatResponse:
     rag_service: RAGService = getattr(app.state, "rag_service", None)
     llm_service: LLMService = getattr(app.state, "llm_service", None)
+    sql_service: SQLService = getattr(app.state, "sql_service", None)
     if not rag_service or not llm_service:
         raise HTTPException(status_code=500, detail="RAG service is not initialized.")
 
@@ -104,8 +121,36 @@ def chat(
     if not allowed_departments:
         raise HTTPException(status_code=403, detail="Role is not authorized for any departments.")
 
+    structured_tables = []
+    if sql_service:
+        structured_tables = list(sql_service.available_tables(allowed_departments).keys())
+
+    query_type = query_classifier.classify(payload.message, structured_tables)
+
+    fallback_query = payload.message
+
+    if query_type == QueryType.SQL and sql_service:
+        try:
+            rows, columns, table_metadata = sql_service.execute(payload.message, allowed_departments)
+        except SQLExecutionError as exc:
+            fallback_query = (
+                f"{payload.message}\n\n"
+                f"(Structured query fallback triggered: {exc})"
+            )
+        else:
+            table_markdown = to_markdown_table(rows, columns)
+            references = [
+                Reference(
+                    source=metadata.path.relative_to(DATA_ROOT.parent).as_posix(),
+                    department=metadata.department,
+                )
+                for metadata in table_metadata
+            ]
+            answer = "Structured query result:\n\n" + table_markdown
+            return ChatResponse(answer=answer, role=role, references=references)
+
     retrieved_contexts = rag_service.query(
-        question=payload.message,
+        question=fallback_query,
         departments=allowed_departments,
         top_k=payload.top_k,
     )

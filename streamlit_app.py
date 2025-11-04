@@ -26,6 +26,7 @@ def initialize_state() -> None:
     st.session_state.setdefault("auth", None)
     st.session_state.setdefault("messages", [])
     st.session_state.setdefault("top_k", 4)
+    st.session_state.setdefault("structured_tables", [])
 
 
 def login(username: str, password: str) -> Dict[str, str]:
@@ -51,6 +52,18 @@ def chat(message: str, top_k: int) -> Dict[str, object]:
     return response.json()
 
 
+def fetch_structured_tables() -> List[str]:
+    auth = st.session_state["auth"]
+    response = requests.get(
+        f"{get_backend_url()}/structured-tables",
+        auth=HTTPBasicAuth(auth["username"], auth["password"]),
+        timeout=15,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return payload.get("tables", [])
+
+
 def render_sidebar() -> None:
     st.sidebar.title("Configuration")
     backend_url = st.sidebar.text_input("Backend URL", value=get_backend_url())
@@ -63,9 +76,14 @@ def render_sidebar() -> None:
             f"({st.session_state['auth']['role']})"
         )
         st.session_state["top_k"] = st.sidebar.slider("Top K", min_value=1, max_value=8, value=st.session_state["top_k"])
+        if st.session_state["structured_tables"]:
+            st.sidebar.markdown("**SQL tables**")
+            for table in st.session_state["structured_tables"]:
+                st.sidebar.code(table)
         if st.sidebar.button("Log out"):
             st.session_state["auth"] = None
             st.session_state["messages"] = []
+            st.session_state["structured_tables"] = []
             st.experimental_rerun()
     else:
         st.sidebar.info("Login to start chatting.")
@@ -83,6 +101,10 @@ def render_login() -> None:
                 return
             try:
                 st.session_state["auth"] = login(username, password)
+                try:
+                    st.session_state["structured_tables"] = fetch_structured_tables()
+                except requests.RequestException as exc:
+                    st.warning(f"Could not load structured tables: {exc}")
                 st.success("Login successful! You can now start chatting.")
                 st.experimental_rerun()
             except requests.HTTPError as exc:
@@ -97,6 +119,12 @@ def render_login() -> None:
 def render_chat() -> None:
     st.header("FinSolve RBAC Chatbot")
     st.caption("Ask questions and the assistant will reply with role-aware context.")
+    if st.session_state["structured_tables"]:
+        st.info(
+            "Structured queries: Use SQL SELECT statements against tables such as "
+            + ", ".join(st.session_state["structured_tables"])
+            + ". Results are limited to 50 rows."
+        )
 
     for message in st.session_state["messages"]:
         with st.chat_message(message["role"]):

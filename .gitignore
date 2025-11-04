@@ -11,4 +11,5 @@ wheels/
 .idea/ 
 *.lock
 resources/vectorstore
+storage/
 .env

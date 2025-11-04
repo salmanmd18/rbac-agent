@@ -94,7 +94,7 @@ class RAGService:
     def _recreate_collection(self) -> None:
         try:
             self.client.delete_collection(self.collection_name)
-        except chromadb.errors.InvalidCollectionError:
+        except chromadb.errors.ChromaError:
             pass
         self.collection = self.client.create_collection(
             name=self.collection_name,
@@ -115,7 +115,7 @@ class RAGService:
         for department_dir in sorted(self.data_root.iterdir()):
             if not department_dir.is_dir():
                 continue
-            department = department_dir.name
+            department = department_dir.name.lower()
             for file_path in sorted(department_dir.rglob("*")):
                 if file_path.is_dir():
                     continue
