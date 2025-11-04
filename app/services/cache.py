@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from threading import Lock
-from typing import Hashable, Optional
+from typing import Hashable, Optional, Sequence
 
 
 class RetrievalCache:
@@ -16,18 +16,24 @@ class RetrievalCache:
     def _make_key(self, role: str, question: str) -> Hashable:
         return (role.strip().lower(), question.strip())
 
+    def _clone(self, value: object) -> object:
+        if isinstance(value, list):
+            return [dict(item) if isinstance(item, dict) else item for item in value]
+        return value
+
     def get(self, role: str, question: str) -> Optional[object]:
         key = self._make_key(role, question)
         with self._lock:
             if key not in self._store:
                 return None
             self._store.move_to_end(key)
-            return self._store[key]
+            cached = self._store[key]
+            return self._clone(cached)
 
     def set(self, role: str, question: str, value: object) -> None:
         key = self._make_key(role, question)
         with self._lock:
-            self._store[key] = value
+            self._store[key] = self._clone(value)
             self._store.move_to_end(key)
             if len(self._store) > self.max_entries:
                 self._store.popitem(last=False)

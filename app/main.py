@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import os
 from pathlib import Path
 from typing import Dict, List
 
@@ -10,9 +11,11 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from dotenv import load_dotenv
 
 from .schemas.chat import ChatRequest, ChatResponse, Reference
+from .services.cache import RetrievalCache
 from .services.llm_service import LLMService
 from .services.query_classifier import QueryClassifier, QueryType
 from .services.rag_service import RAGService
+from .services.reranker import RerankerService
 from .services.role_manager import RoleManager
 from .services.sql_service import SQLExecutionError, SQLService, to_markdown_table
 
@@ -52,6 +55,9 @@ def startup_event() -> None:
     app.state.rag_service.build()
     app.state.llm_service = LLMService()
     app.state.sql_service = SQLService(data_root=DATA_ROOT)
+    enable_reranker = os.getenv("ENABLE_RERANKER", "false").lower() == "true"
+    app.state.reranker_service = RerankerService(enabled=enable_reranker)
+    app.state.cache_service = RetrievalCache()
 
 
 app.add_middleware(
@@ -113,6 +119,8 @@ def chat(
     rag_service: RAGService = getattr(app.state, "rag_service", None)
     llm_service: LLMService = getattr(app.state, "llm_service", None)
     sql_service: SQLService = getattr(app.state, "sql_service", None)
+    reranker_service: RerankerService = getattr(app.state, "reranker_service", None)
+    cache_service: RetrievalCache = getattr(app.state, "cache_service", None)
     if not rag_service or not llm_service:
         raise HTTPException(status_code=500, detail="RAG service is not initialized.")
 
@@ -149,11 +157,23 @@ def chat(
             answer = "Structured query result:\n\n" + table_markdown
             return ChatResponse(answer=answer, role=role, references=references)
 
-    retrieved_contexts = rag_service.query(
-        question=fallback_query,
-        departments=allowed_departments,
-        top_k=payload.top_k,
-    )
+    cached_contexts = None
+    if cache_service:
+        cached_contexts = cache_service.get(role, fallback_query)
+
+    if cached_contexts is not None:
+        retrieved_contexts = cached_contexts
+    else:
+        retrieved_contexts = rag_service.query(
+            question=fallback_query,
+            departments=allowed_departments,
+            top_k=payload.top_k,
+        )
+        if cache_service and retrieved_contexts:
+            cache_service.set(role, fallback_query, retrieved_contexts)
+
+    if reranker_service:
+        retrieved_contexts = reranker_service.reorder(payload.message, retrieved_contexts)
 
     if not retrieved_contexts:
         return ChatResponse(
