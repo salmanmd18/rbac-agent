@@ -1,0 +1,39 @@
+flowchart LR
+    subgraph UI["Streamlit UI"]
+        A[User Chat Input]
+        B[Login Form]
+        C["Analytics Panel (C-level)"]
+    end
+
+    subgraph API["FastAPI Backend"]
+        auth[HTTP Basic Auth]
+        classifier[Query Classifier]
+        sqlAgent[SQL Service\nDuckDB + Policies]
+        rag[RAG Service\nChroma Vector Store]
+        reranker[Reranker Service]
+        cache[Retrieval Cache]
+        llm["LLM Service\n(Groq / Fallback)"]
+        metrics[Metrics Tracker]
+    end
+
+    subgraph Data["Knowledge Sources"]
+        csv[(Department CSVs)]
+        docs[(Markdown/Text Docs)]
+    end
+
+    B --> auth
+    A --> auth
+    auth --> classifier
+    classifier -->|SQL Intent| sqlAgent
+    classifier -->|RAG Intent / Fallback| cache
+    cache -->|Miss| rag
+    rag --> reranker
+    sqlAgent --> llm
+    reranker --> llm
+    llm --> auth
+    auth --> C
+
+    sqlAgent --> csv
+    rag --> docs
+    auth --> metrics
+    metrics --> C
