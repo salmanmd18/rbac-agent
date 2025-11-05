@@ -27,6 +27,7 @@ def initialize_state() -> None:
     st.session_state.setdefault("messages", [])
     st.session_state.setdefault("top_k", 4)
     st.session_state.setdefault("structured_tables", [])
+    st.session_state.setdefault("analytics", {})
 
 
 def login(username: str, password: str) -> Dict[str, str]:
@@ -64,6 +65,17 @@ def fetch_structured_tables() -> List[str]:
     return payload.get("tables", [])
 
 
+def fetch_analytics() -> Dict[str, object]:
+    auth = st.session_state["auth"]
+    response = requests.get(
+        f"{get_backend_url()}/analytics",
+        auth=HTTPBasicAuth(auth["username"], auth["password"]),
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def render_sidebar() -> None:
     st.sidebar.title("Configuration")
     backend_url = st.sidebar.text_input("Backend URL", value=get_backend_url())
@@ -80,10 +92,21 @@ def render_sidebar() -> None:
             st.sidebar.markdown("**SQL tables**")
             for table in st.session_state["structured_tables"]:
                 st.sidebar.code(table)
+        if st.session_state["auth"]["role"] == "c_level" and st.session_state.get("analytics"):
+            st.sidebar.markdown("**Analytics**")
+            queries = st.session_state["analytics"].get("queries", {})
+            per_role = queries.get("per_role", {})
+            for role, counts in per_role.items():
+                st.sidebar.write(f"{role}: {counts.get('total', 0)} total")
+            st.sidebar.caption(
+                f"Cache entries: {st.session_state['analytics'].get('cache_entries', 0)} | "
+                f"Reranker: {'on' if st.session_state['analytics'].get('reranker_enabled') else 'off'}"
+            )
         if st.sidebar.button("Log out"):
             st.session_state["auth"] = None
             st.session_state["messages"] = []
             st.session_state["structured_tables"] = []
+            st.session_state["analytics"] = {}
             st.experimental_rerun()
     else:
         st.sidebar.info("Login to start chatting.")
@@ -105,6 +128,11 @@ def render_login() -> None:
                     st.session_state["structured_tables"] = fetch_structured_tables()
                 except requests.RequestException as exc:
                     st.warning(f"Could not load structured tables: {exc}")
+                if st.session_state["auth"]["role"] == "c_level":
+                    try:
+                        st.session_state["analytics"] = fetch_analytics()
+                    except requests.RequestException as exc:
+                        st.warning(f"Could not load analytics: {exc}")
                 st.success("Login successful! You can now start chatting.")
                 st.experimental_rerun()
             except requests.HTTPError as exc:
@@ -158,6 +186,11 @@ def render_chat() -> None:
                 "references": [],
             }
         st.session_state["messages"].append(assistant_message)
+        if st.session_state["auth"]["role"] == "c_level":
+            try:
+                st.session_state["analytics"] = fetch_analytics()
+            except requests.RequestException as exc:
+                st.warning(f"Could not refresh analytics: {exc}")
         st.experimental_rerun()
 
 

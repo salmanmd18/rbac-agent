@@ -41,3 +41,7 @@ class RetrievalCache:
     def clear(self) -> None:
         with self._lock:
             self._store.clear()
+
+    def size(self) -> int:
+        with self._lock:
+            return len(self._store)
