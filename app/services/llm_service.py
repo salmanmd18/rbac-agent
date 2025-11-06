@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import os
+import re
 import textwrap
-from typing import List, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 try:
     from groq import Groq
@@ -13,6 +14,37 @@ except ImportError:  # pragma: no cover - Groq optional during local dev without
 DEFAULT_SYSTEM_PROMPT = """You are an internal assistant for FinSolve Technologies.
 You must always respect the provided context and cite the specific document names used.
 If the answer is unavailable, state that you cannot find the information in the accessible documents."""
+
+STOPWORDS = {
+    "what",
+    "was",
+    "were",
+    "the",
+    "this",
+    "that",
+    "with",
+    "from",
+    "into",
+    "does",
+    "have",
+    "has",
+    "had",
+    "about",
+    "which",
+    "where",
+    "when",
+    "finsolve",
+    "technologies",
+    "please",
+    "give",
+    "show",
+    "tell",
+    "much",
+    "many",
+    "year",
+    "years",
+    "2024",
+}
 
 
 class LLMService:
@@ -46,7 +78,16 @@ class LLMService:
             return "I could not find relevant information in the accessible documents."
 
         if not self.is_configured:
-            # Deterministic fallback summarization
+            answer_sentence, source = self._extract_answer(question, contexts)
+            if answer_sentence:
+                lines = [
+                    answer_sentence.strip(),
+                    f"(source: {source or 'unknown source'})",
+                    "",
+                    "LLM generation is unavailable (missing GROQ_API_KEY).",
+                ]
+                return "\n".join(lines)
+
             summary_lines = [
                 "Key points from the knowledge base:",
             ]
@@ -88,3 +129,37 @@ class LLMService:
                 header += f" (score: {score:.2f})"
             parts.append(f"{header}\n{document}")
         return "\n\n".join(parts)
+
+    @staticmethod
+    def _extract_answer(question: str, contexts: Sequence[dict]) -> Tuple[Optional[str], Optional[str]]:
+        question_terms = {
+            word
+            for word in re.findall(r"\b\w+\b", question.lower())
+            if len(word) > 3 and word not in STOPWORDS
+        }
+        if not question_terms:
+            return None, None
+
+        best_sentence: Optional[str] = None
+        best_source: Optional[str] = None
+        best_score = 0
+
+        for context in contexts:
+            document = context.get("document", "")
+            source = context.get("source", "unknown source")
+            sentences = re.split(r"(?<=[.!?])\s+", document)
+            for sentence in sentences:
+                cleaned = sentence.strip()
+                if not cleaned:
+                    continue
+                lower_sentence = cleaned.lower()
+                score = sum(1 for term in question_terms if term in lower_sentence)
+                if score > best_score:
+                    best_sentence = cleaned
+                    best_score = score
+                    best_source = source
+
+        if best_sentence and best_score > 0:
+            return best_sentence, best_source
+
+        return None, None

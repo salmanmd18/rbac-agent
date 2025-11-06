@@ -8,13 +8,20 @@ import streamlit as st
 from requests.auth import HTTPBasicAuth
 
 
-DEFAULT_BACKEND_URL = os.getenv("FINCHAT_BACKEND_URL", "http://localhost:8000")
+DEFAULT_BACKEND_URL = os.getenv("FINCHAT_BACKEND_URL", "http://127.0.0.1:8000")
 
 
 st.set_page_config(
     page_title="FinSolve RBAC Chatbot",
     layout="wide",
 )
+
+
+def rerun() -> None:
+    if hasattr(st, "rerun"):
+        st.rerun()
+    else:  # pragma: no cover - fallback for older Streamlit
+        st.experimental_rerun()
 
 
 def get_backend_url() -> str:
@@ -107,7 +114,7 @@ def render_sidebar() -> None:
             st.session_state["messages"] = []
             st.session_state["structured_tables"] = []
             st.session_state["analytics"] = {}
-            st.experimental_rerun()
+            rerun()
     else:
         st.sidebar.info("Login to start chatting.")
 
@@ -134,7 +141,7 @@ def render_login() -> None:
                     except requests.RequestException as exc:
                         st.warning(f"Could not load analytics: {exc}")
                 st.success("Login successful! You can now start chatting.")
-                st.experimental_rerun()
+                rerun()
             except requests.HTTPError as exc:
                 if exc.response.status_code == 401:
                     st.error("Invalid credentials. Please try again.")
@@ -191,7 +198,7 @@ def render_chat() -> None:
                 st.session_state["analytics"] = fetch_analytics()
             except requests.RequestException as exc:
                 st.warning(f"Could not refresh analytics: {exc}")
-        st.experimental_rerun()
+        rerun()
 
 
 def main() -> None:

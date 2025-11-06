@@ -139,6 +139,14 @@ streamlit run streamlit_app.py
 | Priya    | cboard123    | c_level     |
 | Anita    | employee123  | employee    |
 
+## Sample Queries
+- Give me a summary about system architecture. (engineering)
+- Give me the details of employees in Data department whose performance rating is 5. (hr)
+- What percentage of the Vendor Services expense was allocated to marketing-related activities? (finance)
+- What is the Return on Investment (ROI) for FinSolve Technologies? (finance)
+- Give me details about leave policies. (general)
+- What was the percentage increase in FinSolve Technologies's net income in 2024? (finance)
+
 ## Project Structure
 ```
 app/

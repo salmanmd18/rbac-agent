@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import shutil
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, List
@@ -25,18 +27,26 @@ from .services.sql_service import SQLExecutionError, SQLService, to_markdown_tab
 
 LOGGER = logging.getLogger("finsolve")
 logging.basicConfig(level=logging.INFO)
-load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(dotenv_path=BASE_DIR / ".env")
 DATA_ROOT = BASE_DIR / "resources" / "data"
 VECTOR_STORE_DIR = BASE_DIR / "storage" / "vector_store"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    VECTOR_STORE_DIR.mkdir(parents=True, exist_ok=True)
+    # Clean up any residual vector store directories from previous runs.
+    for child in VECTOR_STORE_DIR.iterdir():
+        shutil.rmtree(child, ignore_errors=True)
+
+    run_vector_dir = VECTOR_STORE_DIR / uuid.uuid4().hex
+    run_vector_dir.mkdir(parents=True, exist_ok=True)
+
     rag_service = RAGService(
         data_root=DATA_ROOT,
-        persist_directory=VECTOR_STORE_DIR,
+        persist_directory=run_vector_dir,
     )
     rag_service.build()
     llm_service = LLMService()
@@ -52,11 +62,13 @@ async def lifespan(app: FastAPI):
     app.state.reranker_service = reranker_service
     app.state.cache_service = cache_service
     app.state.metrics_service = metrics_service
+    app.state.vector_store_run_dir = run_vector_dir
 
     try:
         yield
     finally:
         cache_service.clear()
+        shutil.rmtree(run_vector_dir, ignore_errors=True)
 
 
 app = FastAPI(
