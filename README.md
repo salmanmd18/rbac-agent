@@ -169,11 +169,19 @@ uv run pytest
 ```
 The suite covers classifier heuristics, cache behaviour, analytics/authorization rules, SQL policy enforcement, and the `/chat` endpoint SQL happy path for the HR role.
 
+## Docker
+Build and run the combined FastAPI + Streamlit stack inside a single container:
+```bash
+docker build -t finsolve-rbac .
+docker run -p 8000:8000 -p 8501:8501 --env-file .env finsolve-rbac
+```
+The container exposes FastAPI on port `8000` and Streamlit on port `8501`. Pass your `.env` (containing `GROQ_API_KEY`, etc.) via `--env-file` or individual `-e` flags.
+
 ## Offline Evaluation
 ```bash
 uv run python tools/offline_eval.py --dataset eval_samples.json --output results/eval.csv
 ```
-Seed `eval_samples.json` with role-specific prompts and expected keywords to track groundedness/keyword precision. The evaluator runs entirely offline using FastAPI's TestClient.
+Seed `eval_samples.json` with role-specific prompts and expected keywords to track groundedness/keyword precision. The evaluator runs entirely offline using FastAPI’s TestClient.
 
 ## Extending the Solution
 - Update role mappings in `app/services/role_manager.py` to add departments or refine RBAC.  
